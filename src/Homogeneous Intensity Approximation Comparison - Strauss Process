@@ -82,6 +82,7 @@ model= "Geyer"
 beta0 =  log(beta)
 lambda_init <- 1
 
+#Calling the functions from the script `Homogeneous Intensity Approximation.R`
 Nn <- find_Nn(N=N, alpha=alpha,Rs=Rs, S=S, epsilon=epsilon, lambda_guess=lambda_init,model=model)
 lambda_star <- solve_lambda(alpha = alpha, Rs = Rs, N = N, Nn=Nn$Nn, S = S, epsilon = epsilon,
                             lambda_guess = lambda_init,model=model,beta0=beta0,V_expectations=Nn$V_expectations)
