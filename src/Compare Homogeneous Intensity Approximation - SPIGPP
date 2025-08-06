@@ -1,0 +1,103 @@
+library(ppjsdm)
+library(spatstat)
+library(ggplot2)
+
+#The first half of the code represents how to approximate the intensity using Poisson saddlepoint approximation
+#When having a softcore `exponential` potential function.
+#This process has to be repeated for each alpha to derive the results given in the vectors in the second half.
+
+alpha <- -0.1 # Interaction strength. 
+Rs <-  0.05   # Interaction radius
+N <-  2   # Saturation parameter
+S <- 1e5          # Number of simulations per n
+epsilon <- 1e-4   # Accuracy threshold for truncation
+model= "exponential" 
+beta0 =  2
+
+#Simulate 1000 point processes to check the saddle-point lambda estimate
+sims <- ppjsdm::rgibbs(nsim = 1000, beta0 = beta0, alpha = alpha, saturation = N, short_range = Rs, steps = 10000,model=model)
+counts <- sapply(sims, function(conf) length(conf$x))
+
+# Empirical intensity (mean number of points)
+lambda_emp <- mean(counts)
+
+# Standard deviation
+lambda_sd <- sd(counts)
+
+# Standard error of the mean
+lambda_sem <- lambda_sd / sqrt(length(counts))
+
+lambda_init <- 1
+
+#Calling functions from `Homogeneous Intensity Approximation.R`
+Nn <- find_Nn(N=N, alpha=alpha,Rs=Rs, S=S, epsilon=epsilon, lambda_guess=lambda_init,model=model)
+
+lambda_star <- solve_lambda(alpha = alpha, Rs = Rs, N = N, Nn=Nn$Nn, S = S, epsilon = epsilon,
+                            lambda_guess = lambda_init,model=model,beta0=beta0,V_expectations=Nn$V_expectations)
+cat(sprintf("Converged λ ≈ %.6f\n", lambda_star),sprintf("Empirical λ ≈ %.6f\n", lambda_emp))
+
+#Create Figure 3 in the publication
+
+saddle_data <- data.frame(
+  beta = rep(c(1, 2, 5), each = 17),
+  alpha = c(-4,-3,-2,-1.5,-1,-0.5, -0.4,-0.3,-0.2,-0.1, 0, 0.1,0.2,0.3,0.4, 0.5,1 ),
+  lambda_ps = c(2.522340,  2.532102, 2.552596, 2.570868, 2.598965, 2.643738, 2.597129, 2.623278, 2.651918,
+                2.683665,  2.718282, 2.756640, 2.799304,  2.847641, 2.900802, 2.962567, 3.455435 ),
+    c(4.855772, 5.033233, 5.352961, 5.598790, 5.939747, 6.363242, 6.525535, 6.769222,6.949487, 7.153792, 
+                7.389056, 7.662178, 7.988857, 8.367429, 8.834904, 9.405466, 16.216392),
+              c(3.444913, 6.323574,  20.461180, 51.512876, 59.785389, 80.584651, 88.448372, 98.505935, 111.458244, 
+                127.951284, 148.413159, 173.459165, 203.336670, 239.115447,  281.457188, 331.399885, 768.413183),  
+  lambda_sim = c(2.07, 2.23, 2.298, 2.37, 2.438, 2.519, 2.637,  2.541, 2.564, 2.704, 2.759, 2.733, 2.817,
+                 2.861, 2.876, 2.935, 3.391),
+            c(4.542, 4.757, 5.139, 5.546,  5.934, 6.354, 6.603, 6.764, 6.855, 7.119, #Beta=2
+                  7.504, 7.661, 8.018, 8.267, 8.431, 9.084, 13.413),  #Beta=2
+                 c(21.306, 25.776, 34.419, 42.267, 55.993, 84.213, 92.354, 102.987, 115.514, 130.959, #Beta=5
+                   147.66, 170.394, 197.172, 229.922, 270.896, 320.574, 810.611) #Beta=5
+)
+
+ggplot(data = saddle_data, aes(x = alpha)) +
+  geom_line(aes(y = lambda_ps, color = "Saddlepoint")) +
+  geom_line(aes(y = lambda_sim, color = "Empirical")) +
+  facet_wrap(~ beta, labeller = label_bquote(beta == .(beta)), scales = "free_y") +
+  labs(
+    x = expression(alpha),
+    y = expression(lambda[PS]),
+    title = "Poisson-Saddlepoint Approximation for Saturated Pairwise Interaction Gibbs Point Process",
+    color = "Method"
+  ) +
+  theme_minimal(base_size = 14)
+
+
+saddle_data <- data.frame(
+  beta = rep(c(1, 2, 5), each = 17),
+  alpha = rep(c(-4, -3, -2, -1.5, -1, -0.5, -0.4, -0.3, -0.2, -0.1, 0, 0.1, 0.2, 0.3, 0.4, 0.5, 1), times = 3),
+  lambda_ps = c(
+    2.522340, 2.532102, 2.552596, 2.570868, 2.598965, 2.643738, 2.597129, 2.623278, 2.651918,
+    2.683665, 2.718282, 2.756640, 2.799304, 2.847641, 2.900802, 2.962567, 3.455435,
+    4.855772, 5.033233, 5.352961, 5.598790, 5.939747, 6.363242, 6.525535, 6.769222, 6.949487,
+    7.153792, 7.389056, 7.662178, 7.988857, 8.367429, 8.834904, 9.405466, 16.216392,
+    3.444913, 6.323574, 20.461180, 51.512876, 59.785389, 80.584651, 88.448372, 98.505935,
+    111.458244, 127.951284, 148.413159, 173.459165, 203.336670, 239.115447, 281.457188,
+    331.399885, 768.413183
+  ),
+  lambda_sim = c(
+    2.07, 2.23, 2.298, 2.37, 2.438, 2.519, 2.637, 2.541, 2.564, 2.704,
+    2.759, 2.733, 2.817, 2.861, 2.876, 2.935, 3.391,
+    4.542, 4.757, 5.139, 5.546, 5.934, 6.354, 6.603, 6.764, 6.855, 7.119,
+    7.504, 7.661, 8.018, 8.267, 8.431, 9.084, 13.413,
+    21.306, 25.776, 34.419, 42.267, 55.993, 84.213, 92.354, 102.987, 115.514, 130.959,
+    147.66, 170.394, 197.172, 229.922, 270.896, 320.574, 810.611
+  )
+)
+ggplot(data = saddle_data, aes(x = alpha)) +
+  geom_line(aes(y = lambda_ps, color = "Saddlepoint")) +
+  geom_line(aes(y = lambda_sim, color = "Empirical")) +
+  facet_wrap(~ beta, labeller = label_bquote(beta == .(beta)), scales = "free_y") +
+  labs(
+    x = expression(alpha),
+    y = expression(lambda[PS]),
+    title = "Poisson-Saddlepoint Approximation for Saturated Pairwise Interaction Gibbs Point Process",
+    color = "Method"
+  ) +
+  theme_minimal(base_size = 14)
+
