@@ -1,0 +1,45 @@
+
+sample_uniform_disk <- function(n, R) {
+  angles <- runif(n, 0, 2*pi)
+  radii  <- sqrt(runif(n)) * R
+  cbind(radii * cos(angles), radii * sin(angles))
+}
+
+estimate_Ks_sparse_vectorised <- function(r_vals, lambda_ps, alpha, N, Rs, model, S = 1000,beta0) {
+  R <- 4 * Rs
+  max_n <- qpois(0.999, lambda_ps * pi * R^2)
+  poisson_weights <- dpois(0:max_n, lambda_ps * pi * R^2)
+  
+  # Matrix to store expectations for each n and each r
+  Ks_matrix <- matrix(0, nrow = length(r_vals), ncol = max_n + 1)
+  
+  for (n in 0:max_n) {
+    if (n == 0) {
+      next
+    }
+    
+    # Store all t-values and lambda values across S sims
+    t_values_mat <- matrix(0, nrow = S, ncol = length(r_vals))
+    lambda_vals  <- numeric(S)
+    
+    for (i in 1:S) {
+      omega <- sample_uniform_disk(n, R)
+      dists <- sqrt(rowSums(omega^2))
+      
+      # Count how many points fall within each r
+      t_values_mat[i, ] <- sapply(r_vals, function(r) sum(dists <= r))
+      
+      lambda_vals[i] <- ppjsdm::compute_papangelou(omega, x = 0, y = 0,
+                                                   alpha = alpha, model = model,
+                                                   short_range = Rs, saturation = N)
+    }
+    
+    # Compute mean for each radius
+    exp_vals <- colMeans(t_values_mat * lambda_vals)*exp(beta0)
+    Ks_matrix[, n + 1] <- exp_vals
+  }
+  
+  # Weighted sum over n for each r
+  K_sparse <- rowSums(Ks_matrix * matrix(poisson_weights, nrow = length(r_vals), ncol = max_n + 1, byrow = TRUE)) / (lambda_ps^2)
+  data.frame(r = r_vals, Ks = K_sparse)
+}
