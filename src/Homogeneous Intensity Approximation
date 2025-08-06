@@ -1,0 +1,105 @@
+library(spatstat)
+library(ggplot2)
+library(ppjsdm)
+
+# Uniformly sample n points in disk of radius R
+sample_uniform_disk <- function(n, R) {
+  angles <- runif(n, 0, 2*pi)
+  radii  <- sqrt(runif(n)) * R
+  cbind(radii * cos(angles), radii * sin(angles))
+}
+
+
+estimate_expV_expectation <- function(alpha, n, N, Rs, S = 1000, model) {
+  R <- 4 * Rs  # sampling radius
+  if (n == 0) return(1)  # E[exp(alpha * 0)] = 1 when V = 0
+  
+  expV_vals <- numeric(S)
+  
+  for (i in 1:S) {
+    omega <- sample_uniform_disk(n, R)
+    V <- log(ppjsdm::compute_papangelou(omega,x = 0, y = 0, alpha=1, model = model, short_range = Rs, saturation = N))
+    expV_vals[i] <- exp(alpha * V)
+  }
+  
+  mean(expV_vals)
+}
+
+find_Nn <- function(N, Rs, S, epsilon, alpha = NULL, lambda_guess = NULL, model) {
+  n <- 0
+  V_expectations <- list()
+  EV_prev <- NA
+  converged <- FALSE
+  
+  while (!converged) {
+    EV <- estimate_expV_expectation(alpha=alpha,n=n, N=N, Rs=Rs, S=S, model = model)
+    V_expectations[[as.character(n)]] <- EV
+    if (!is.na(EV_prev)) {
+      diff <- abs(EV - EV_prev)
+      if (diff < epsilon || diff == 0) {
+        converged <- TRUE
+        
+      }
+    }
+    
+    cat(sprintf("n = %d | E[V] = %.4f | ΔE[V] = %.4e\n", n, EV, ifelse(is.na(EV_prev), NA, diff)))
+    
+    EV_prev <- EV
+    n <- n + 1
+    
+    if (n > 200) {
+      warning("Max n reached in find_Nn before convergence of EV.")
+      break
+    }
+  }
+  
+  return(list(Nn = n - 1, V_expectations = V_expectations))
+}
+
+compute_M <- function(lambda, alpha, Rs, N, Nn,covariates=NULL,V_expectations=V_expectations,model,beta0=1,beta=NULL) {
+  mu <- lambda * pi * (4*Rs)^2
+  exp_minus_mu <- exp(-mu)
+  M_sum <- 0
+  
+  #Compute covariate contribution
+  if (!is.null(beta) && !is.null(covariates)) {
+    beta_term <- exp(beta0 + sum(beta * covariates))
+  } else {
+    beta_term <- exp(beta0)  # only intercept
+  }
+  
+  tail_terms <- 200
+  
+  for (n in 0:Nn) {
+    EV <- V_expectations[[as.character(n)]]
+    term <- (mu^n / factorial(n)) * EV 
+    M_sum <- M_sum + term 
+  }
+  
+  # Optional: add tail term if you want to bound mass
+  tail_indices <- (Nn + 1):(Nn + tail_terms)
+  tail_sum <- sum(mu^tail_indices / factorial(tail_indices))* V_expectations[[as.character(Nn)]]
+  
+  M_total <- exp_minus_mu * (M_sum + tail_sum) * beta_term
+  return(M_total)
+}
+
+solve_lambda <- function(alpha, Rs, N, S,Nn, epsilon = 1e-6, lambda_guess = 1.0, V_expectations=V_expectations, max_iter = 100, covariates=NULL,model,beta=NULL,beta0=1) {
+  lambda <- lambda_guess
+  diff <- Inf
+  iter <- 0
+  
+  while (diff > epsilon && iter < max_iter) {
+    M_new <- compute_M(lambda, alpha, Rs, N, Nn,covariates=covariates,V_expectations, model = model,beta0=beta0,beta=beta)
+    
+    diff <- abs(M_new - lambda)
+    cat(sprintf("Iter %d | λ = %.6f | M(λ) = %.6f | |M - λ| = %.2e\n", iter, lambda, M_new, diff))
+    
+    lambda <- M_new  # update lambda to the new estimate
+    iter <- iter + 1
+  }
+  
+  if (iter == max_iter) warning("Max iterations reached before convergence.")
+  
+  return(lambda)
+}
